@@ -1,17 +1,17 @@
-import { useState, ChangeEvent, FormEvent } from 'react';
+import { useState } from 'react';
 
 export default function Uploader() {
-  const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<string>('');
+  const [file, setFile] = useState(null);
+  const [status, setStatus] = useState('');
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       setFile(e.target.files[0]);
       setStatus('');
     }
   };
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) {
       setStatus('Please select a file first.');
@@ -36,7 +36,7 @@ export default function Uploader() {
       const data = await response.json();
       setStatus(`Success! File ID: ${data.id}, Status: ${data.status}`);
       setFile(null); // clear file
-    } catch (err: any) {
+    } catch (err) {
       setStatus(`Error: ${err.message}`);
     }
   };
