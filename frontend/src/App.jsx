@@ -2,6 +2,19 @@ import { useState, useEffect, useRef } from 'react';
 import Uploader from './components/Uploader';
 
 export default function App() {
+  const [token, setToken] = useState(localStorage.getItem('summacast_token') || null);
+  const [userEmail, setUserEmail] = useState(localStorage.getItem('summacast_email') || '');
+  
+  // Auth Form States
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
+  // App Main States
   const [mediaList, setMediaList] = useState([]);
   const [currentMediaId, setCurrentMediaId] = useState(null);
   const [selectedMedia, setSelectedMedia] = useState(null);
@@ -29,14 +42,30 @@ export default function App() {
   const mediaRef = useRef(null);
   const chatEndRef = useRef(null);
 
-  // Fetch initial media list
+  // Custom authenticated fetch helper
+  const authenticatedFetch = async (url, options = {}) => {
+    const headers = options.headers || {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const response = await fetch(url, { ...options, headers });
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error('Session expired. Please log in again.');
+    }
+    return response;
+  };
+
+  // Fetch initial media list on auth success
   useEffect(() => {
-    fetchMediaList();
-  }, []);
+    if (token) {
+      fetchMediaList();
+    }
+  }, [token]);
 
   const fetchMediaList = async () => {
     try {
-      const res = await fetch('/api/media');
+      const res = await authenticatedFetch('/api/media');
       if (!res.ok) throw new Error('Failed to fetch media list');
       const data = await res.json();
       setMediaList(data);
@@ -47,6 +76,8 @@ export default function App() {
 
   // Polling for processing items inside Dashboard
   useEffect(() => {
+    if (!token) return;
+    
     const hasProcessing = mediaList.some(item => 
       ['UPLOADED', 'PROCESSING', 'SUMMARIZING'].includes(item.status)
     );
@@ -57,18 +88,18 @@ export default function App() {
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [mediaList]);
+  }, [mediaList, token]);
 
   // Polling active item status inside Detail View
   useEffect(() => {
-    if (!currentMediaId || !selectedMedia) return;
+    if (!token || !currentMediaId || !selectedMedia) return;
 
     const isProcessing = ['UPLOADED', 'PROCESSING', 'SUMMARIZING'].includes(selectedMedia.status);
 
     if (isProcessing) {
       const interval = setInterval(async () => {
         try {
-          const res = await fetch('/api/media');
+          const res = await authenticatedFetch('/api/media');
           if (res.ok) {
             const data = await res.json();
             setMediaList(data);
@@ -86,7 +117,7 @@ export default function App() {
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [currentMediaId, selectedMedia]);
+  }, [currentMediaId, selectedMedia, token]);
 
   // Scroll to bottom of chat
   useEffect(() => {
@@ -110,8 +141,8 @@ export default function App() {
     setDetailError('');
     try {
       const [summaryRes, transcriptRes] = await Promise.all([
-        fetch(`/api/media/${id}/summary`),
-        fetch(`/api/media/${id}/transcript`)
+        authenticatedFetch(`/api/media/${id}/summary`),
+        authenticatedFetch(`/api/media/${id}/transcript`)
       ]);
 
       if (!summaryRes.ok || !transcriptRes.ok) {
@@ -129,6 +160,76 @@ export default function App() {
     } finally {
       setIsLoadingDetail(false);
     }
+  };
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccess('');
+
+    if (!authEmail || !authPassword) {
+      setAuthError('Email and Password are required.');
+      return;
+    }
+
+    if (authMode === 'register' && authPassword !== authConfirmPassword) {
+      setAuthError('Passwords do not match.');
+      return;
+    }
+
+    setIsAuthLoading(true);
+
+    try {
+      if (authMode === 'register') {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authEmail, password: authPassword })
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Registration failed.');
+        }
+        setAuthSuccess('Registration successful! Please log in.');
+        setAuthMode('login');
+        setAuthPassword('');
+        setAuthConfirmPassword('');
+      } else {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authEmail, password: authPassword })
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Invalid email or password.');
+        }
+        const data = await res.json();
+        localStorage.setItem('summacast_token', data.access_token);
+        localStorage.setItem('summacast_email', authEmail);
+        setToken(data.access_token);
+        setUserEmail(authEmail);
+        setAuthEmail('');
+        setAuthPassword('');
+      }
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('summacast_token');
+    localStorage.removeItem('summacast_email');
+    setToken(null);
+    setUserEmail('');
+    setMediaList([]);
+    setCurrentMediaId(null);
+    setSelectedMedia(null);
+    setDetailSummary(null);
+    setDetailChapters([]);
+    setDetailTranscript([]);
   };
 
   const handleCardClick = (item) => {
@@ -187,7 +288,7 @@ export default function App() {
     setChatError('');
 
     try {
-      const response = await fetch(`/api/media/${currentMediaId}/qa`, {
+      const response = await authenticatedFetch(`/api/media/${currentMediaId}/qa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: userMsg })
@@ -204,6 +305,44 @@ export default function App() {
       setChatError(err.message);
     } finally {
       setIsChatLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!selectedMedia) return;
+    try {
+      const res = await authenticatedFetch(`/api/media/${currentMediaId}/download`);
+      if (!res.ok) throw new Error('Download failed');
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transcript_${selectedMedia.filename.replace(/\s+/g, '_')}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!selectedMedia) return;
+    if (!window.confirm("Are you sure you want to cancel processing for this file? This will stop the active AI workflow.")) return;
+    
+    try {
+      const res = await authenticatedFetch(`/api/media/${currentMediaId}/cancel`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Cancellation failed.');
+      }
+      handleBack();
+    } catch (err) {
+      alert(err.message);
     }
   };
 
@@ -250,14 +389,16 @@ export default function App() {
         .wave-bar:nth-child(7) { animation-delay: 0.35s; }
       `}</style>
 
-      {/* Futuristic Glow Header */}
+      {/* Header Bar */}
       <header style={{ 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'space-between', 
         paddingBottom: '20px', 
         borderBottom: '1px solid var(--border-light)',
-        marginBottom: '20px'
+        marginBottom: '20px',
+        flexWrap: 'wrap',
+        gap: '12px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{
@@ -280,18 +421,115 @@ export default function App() {
             </p>
           </div>
         </div>
+
+        {token && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Logged in as: <strong style={{ color: 'var(--text-primary)' }}>{userEmail}</strong>
+            </span>
+            <button onClick={handleLogout} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
+              Sign Out
+            </button>
+          </div>
+        )}
       </header>
 
+      {/* USER AUTHENTICATION SCREEN */}
+      {!token && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '60px 0' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '32px' }}>
+            {/* Tabs for Login vs Register */}
+            <div className="tabs-nav" style={{ marginBottom: '24px' }}>
+              <button 
+                className={`tab-btn ${authMode === 'login' ? 'active' : ''}`}
+                onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
+              >
+                Sign In
+              </button>
+              <button 
+                className={`tab-btn ${authMode === 'register' ? 'active' : ''}`}
+                onClick={() => { setAuthMode('register'); setAuthError(''); setAuthSuccess(''); }}
+              >
+                Sign Up
+              </button>
+            </div>
+
+            <h2 style={{ fontSize: '1.4rem', marginBottom: '8px', textAlign: 'center' }}>
+              {authMode === 'login' ? 'Welcome Back' : 'Create Account'}
+            </h2>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '24px' }}>
+              {authMode === 'login' ? 'Access your private podcast insights' : 'Get started with local media summarization'}
+            </p>
+
+            {authError && (
+              <div className="badge badge-failed" style={{ display: 'block', width: '100%', textAlign: 'center', marginBottom: '16px', padding: '10px', borderRadius: '8px' }}>
+                {authError}
+              </div>
+            )}
+
+            {authSuccess && (
+              <div className="badge badge-completed" style={{ display: 'block', width: '100%', textAlign: 'center', marginBottom: '16px', padding: '10px', borderRadius: '8px' }}>
+                {authSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>Email Address</label>
+                <input 
+                  type="email" 
+                  className="form-input" 
+                  placeholder="name@example.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>Password</label>
+                <input 
+                  type="password" 
+                  className="form-input" 
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  required
+                />
+              </div>
+
+              {authMode === 'register' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>Confirm Password</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="••••••••"
+                    value={authConfirmPassword}
+                    onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} disabled={isAuthLoading}>
+                {isAuthLoading ? 'Please wait...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* DASHBOARD VIEW */}
-      {!currentMediaId && (
+      {token && !currentMediaId && (
         <div className="dashboard-grid">
-          {/* Left panel: Upload & Stats */}
+          {/* Left panel: Upload */}
           <div className="glass-panel" style={{ padding: '24px', height: 'fit-content' }}>
             <h2 style={{ marginBottom: '16px', fontSize: '1.25rem' }}>Upload Project</h2>
             <p style={{ fontSize: '0.88rem', marginBottom: '20px' }}>
               Upload any podcast audio or video file. Our Whisper engine will transcribe it, and Qwen3 will automatically partition it into key chapters and produce a smart summary.
             </p>
-            <Uploader onUploadSuccess={fetchMediaList} />
+            <Uploader token={token} onUploadSuccess={fetchMediaList} />
           </div>
 
           {/* Right panel: Projects Grid */}
@@ -376,7 +614,7 @@ export default function App() {
                         </h3>
                         
                         <p style={{ fontSize: '0.8rem', margin: 0, display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {item.summary || (item.status === 'FAILED' ? 'Processing failed. Please check logs.' : 'Transcription & chapters processing in progress...')}
+                          {item.summary || (item.status === 'FAILED' ? 'Processing failed or cancelled.' : 'Transcription & chapters processing in progress...')}
                         </p>
                       </div>
                       
@@ -406,18 +644,29 @@ export default function App() {
       )}
 
       {/* DETAIL PROJECT VIEW */}
-      {currentMediaId && selectedMedia && (
+      {token && currentMediaId && selectedMedia && (
         <div>
           {/* Back Action Bar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-            <button onClick={handleBack} className="btn btn-secondary">
-              <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              Back to Dashboard
-            </button>
-            <span style={{ color: 'var(--text-muted)' }}>/</span>
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Project Insights</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button onClick={handleBack} className="btn btn-secondary">
+                <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Back to Dashboard
+              </button>
+              <span style={{ color: 'var(--text-muted)' }}>/</span>
+              <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Project Insights</span>
+            </div>
+
+            {selectedMedia.status === 'COMPLETED' && (
+              <button onClick={handleDownload} className="btn btn-secondary" style={{ borderColor: 'var(--primary-purple)' }}>
+                <svg style={{ width: '14px', height: '14px', color: 'var(--primary-purple)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download Transcript
+              </button>
+            )}
           </div>
 
           {/* Project Details Banner */}
@@ -442,9 +691,9 @@ export default function App() {
               <svg style={{ width: '48px', height: '48px', color: 'var(--primary-rose)', marginBottom: '16px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Project AI Processing Failed</h3>
+              <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Project AI Processing Stopped</h3>
               <p style={{ color: 'var(--text-secondary)', maxWidth: '500px', margin: '0 auto 20px', fontSize: '0.9rem' }}>
-                We encountered an error during audio extraction, transcription, or summarization. Please make sure the media file is valid, contains clear speech, and is uploaded correctly.
+                The processing workflow was either manually cancelled or failed. Make sure the media contains clear speech and the background services are active.
               </p>
               <button onClick={handleBack} className="btn btn-secondary">
                 Return to Dashboard
@@ -456,7 +705,6 @@ export default function App() {
           {['UPLOADED', 'PROCESSING', 'SUMMARIZING'].includes(selectedMedia.status) && (
             <div className="glass-panel" style={{ padding: '60px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ position: 'relative', width: '80px', height: '80px', marginBottom: '24px' }}>
-                {/* Pulsing Outer Ring */}
                 <div style={{
                   position: 'absolute',
                   inset: 0,
@@ -465,7 +713,6 @@ export default function App() {
                   opacity: 0.1,
                   animation: 'pulse-purple 2.5s infinite ease-in-out'
                 }} />
-                {/* Rotating Inner Segment */}
                 <div style={{
                   position: 'absolute',
                   inset: '8px',
@@ -490,13 +737,20 @@ export default function App() {
                 {selectedMedia.status === 'SUMMARIZING' && 'Speech transcript successfully extracted! Summarizing and generating logical chapters with local Qwen3 LLM...'}
               </p>
 
-              <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-light)', paddingTop: '20px', width: '100%', maxWidth: '400px', justifyContent: 'space-around' }}>
+              <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-light)', paddingTop: '20px', width: '100%', maxWidth: '400px', justifyContent: 'space-around', marginBottom: '24px' }}>
                 <span style={{ color: selectedMedia.status === 'UPLOADED' ? 'var(--primary-indigo)' : 'var(--text-secondary)', fontWeight: selectedMedia.status === 'UPLOADED' ? '600' : '400' }}>1. Uploaded</span>
                 <span>→</span>
                 <span style={{ color: selectedMedia.status === 'PROCESSING' ? 'var(--primary-indigo)' : 'var(--text-secondary)', fontWeight: selectedMedia.status === 'PROCESSING' ? '600' : '400' }}>2. Transcribing</span>
                 <span>→</span>
                 <span style={{ color: selectedMedia.status === 'SUMMARIZING' ? 'var(--primary-indigo)' : 'var(--text-secondary)', fontWeight: selectedMedia.status === 'SUMMARIZING' ? '600' : '400' }}>3. Summarizing</span>
               </div>
+
+              <button onClick={handleCancel} className="btn btn-secondary" style={{ borderColor: 'var(--primary-rose)', color: '#f87171' }}>
+                <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Cancel AI Processing
+              </button>
             </div>
           )}
 
@@ -517,7 +771,7 @@ export default function App() {
                       {selectedMedia.filename.toLowerCase().endsWith('.mp4') || selectedMedia.filename.toLowerCase().endsWith('.webm') ? (
                         <video 
                           ref={mediaRef} 
-                          src={`/api/media/${selectedMedia.id}/file`} 
+                          src={`/api/media/${selectedMedia.id}/file?token=${token}`} 
                           className="media-player-element" 
                           controls
                           onTimeUpdate={handleTimeUpdate}
@@ -567,7 +821,7 @@ export default function App() {
 
                           <audio 
                             ref={mediaRef} 
-                            src={`/api/media/${selectedMedia.id}/file`} 
+                            src={`/api/media/${selectedMedia.id}/file?token=${token}`} 
                             className="media-player-element" 
                             controls
                             onTimeUpdate={handleTimeUpdate}

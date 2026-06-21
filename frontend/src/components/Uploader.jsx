@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 
-export default function Uploader({ onUploadSuccess }) {
+export default function Uploader({ token, onUploadSuccess }) {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState('');
   const [isDragActive, setIsDragActive] = useState(false);
@@ -53,10 +53,16 @@ export default function Uploader({ onUploadSuccess }) {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     try {
       setStatus('Uploading...');
       const response = await fetch('/api/upload', {
         method: 'POST',
+        headers: headers,
         body: formData,
       });
 

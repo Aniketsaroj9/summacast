@@ -15,10 +15,10 @@ if (process.env.FFMPEG_PATH) {
  * @param {string} outputPath - Path to save the extracted 16kHz mono WAV file
  * @returns {Promise<string>} - Resolves to the outputPath
  */
-function extractAudio(inputPath, outputPath) {
+function extractAudio(inputPath, outputPath, onSpawn) {
   return new Promise((resolve, reject) => {
     console.log(`Extracting and downsampling audio: ${inputPath} -> ${outputPath}`);
-    ffmpeg(inputPath)
+    const command = ffmpeg(inputPath)
       .noVideo()
       .audioCodec('pcm_s16le')
       .audioChannels(1)
@@ -34,8 +34,12 @@ function extractAudio(inputPath, outputPath) {
       .on('error', (err) => {
         console.error('Error during audio extraction:', err);
         reject(err);
-      })
-      .save(outputPath);
+      });
+
+    if (onSpawn) {
+      onSpawn(command);
+    }
+    command.save(outputPath);
   });
 }
 
@@ -46,7 +50,7 @@ function extractAudio(inputPath, outputPath) {
  * @param {string} outputBase - Base path for output files (no extension)
  * @returns {Promise<Array>} - Resolves to array of segments: { start: float, end: float, text: string }
  */
-function transcribeAudio(audioPath, modelPath, outputBase) {
+function transcribeAudio(audioPath, modelPath, outputBase, onSpawn) {
   return new Promise((resolve, reject) => {
     // Determine whisper executable path
     const baseDir = path.dirname(__dirname);
@@ -71,6 +75,9 @@ function transcribeAudio(audioPath, modelPath, outputBase) {
     console.log(`Spawning transcription: ${exePath} ${args.join(' ')}`);
     
     const child = spawn(exePath, args);
+    if (onSpawn) {
+      onSpawn(child);
+    }
     let stderr = '';
 
     child.stderr.on('data', (data) => {

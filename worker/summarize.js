@@ -22,7 +22,7 @@ function formatTime(seconds) {
  * @param {Array<{start: number, end: number, text: string}>} segments 
  * @returns {Promise<{summary: string, chapters: Array<{start_time: number, title: string, summary: string}>}>}
  */
-async function generateSummaryAndChapters(segments) {
+async function generateSummaryAndChapters(segments, signal) {
   if (!segments || segments.length === 0) {
     return { summary: 'No transcript available to summarize.', chapters: [] };
   }
@@ -47,6 +47,7 @@ Summary:`;
     const response = await fetch(`${OLLAMA_HOST}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: signal,
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt: summaryPrompt,
@@ -97,6 +98,7 @@ JSON response:`;
     const response = await fetch(`${OLLAMA_HOST}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: signal,
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt: chaptersPrompt,
