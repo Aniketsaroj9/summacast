@@ -4,6 +4,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from sqlalchemy.orm import Session
 from backend.db import engine, get_db
 from backend.models import Base, Media, TranscriptSegment, Chapter
+from fastapi.responses import FileResponse
 from backend.storage import save_file
 import httpx
 
@@ -146,4 +147,42 @@ async def ask_question_about_media(id: int, request: QARequest, db: Session = De
             return {"answer": answer}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query local LLM: {str(e)}")
+
+@app.get("/api/media")
+def list_media(db: Session = Depends(get_db)):
+    media_files = db.query(Media).order_by(Media.id.desc()).all()
+    return [
+        {
+            "id": m.id,
+            "filename": m.original_filename,
+            "status": m.status,
+            "summary": m.summary
+        }
+        for m in media_files
+    ]
+
+@app.get("/api/media/{id}/file")
+def get_media_file(id: int, db: Session = Depends(get_db)):
+    media = db.query(Media).filter(Media.id == id).first()
+    if not media:
+        raise HTTPException(status_code=404, detail="Media file not found.")
+    if not os.path.exists(media.file_path):
+        raise HTTPException(status_code=404, detail="Physical media file not found on disk.")
+    
+    # Determine MIME content-type based on file extension
+    mime_type = "application/octet-stream"
+    lower_name = media.original_filename.lower()
+    if lower_name.endswith(".mp4"):
+        mime_type = "video/mp4"
+    elif lower_name.endswith(".mp3"):
+        mime_type = "audio/mpeg"
+    elif lower_name.endswith(".wav"):
+        mime_type = "audio/wav"
+    elif lower_name.endswith(".m4a"):
+        mime_type = "audio/mp4"
+    elif lower_name.endswith(".webm"):
+        mime_type = "video/webm"
+        
+    return FileResponse(media.file_path, media_type=mime_type)
+
 
