@@ -75,9 +75,57 @@ async function saveTranscriptSegments(mediaId, segments) {
   }
 }
 
+/**
+ * Save summary and chapters within a single database transaction.
+ * @param {number} mediaId 
+ * @param {string} summary 
+ * @param {Array<{start_time: number, title: string, summary: string}>} chapters 
+ */
+async function saveSummaryAndChapters(mediaId, summary, chapters) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Update Media summary field
+    await client.query(
+      'UPDATE media_files SET summary = $1 WHERE id = $2',
+      [summary, mediaId]
+    );
+
+    // 2. Insert chapters if any
+    if (chapters && chapters.length > 0) {
+      const values = [];
+      const placeholders = [];
+      let counter = 1;
+
+      chapters.forEach((ch) => {
+        placeholders.push(`($${counter}, $${counter + 1}, $${counter + 2}, $${counter + 3})`);
+        values.push(mediaId, ch.start_time, ch.title, ch.summary || null);
+        counter += 4;
+      });
+
+      const queryText = `
+        INSERT INTO chapters (media_id, start_time, title, summary) 
+        VALUES ${placeholders.join(', ')}
+      `;
+
+      await client.query(queryText, values);
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   pool,
   getMediaFile,
   updateMediaStatus,
   saveTranscriptSegments,
+  saveSummaryAndChapters,
 };
+

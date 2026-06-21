@@ -1,7 +1,8 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-pg8000==1.31.5
-redis==5.0.1
-python-dotenv==1.0.0
-sqlalchemy==2.0.23
-python-multipart==0.0.6
+fastapi
+uvicorn
+pg8000
+redis
+python-dotenv
+sqlalchemy>=2.0.51
+python-multipart
+httpx

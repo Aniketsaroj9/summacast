@@ -3,7 +3,8 @@ const Redis = require('ioredis');
 const path = require('path');
 const fs = require('fs');
 const { extractAudio, transcribeAudio } = require('./transcribe');
-const { getMediaFile, updateMediaStatus, saveTranscriptSegments } = require('./db');
+const { getMediaFile, updateMediaStatus, saveTranscriptSegments, saveSummaryAndChapters } = require('./db');
+const { generateSummaryAndChapters } = require('./summarize');
 
 // Load env vars
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -59,11 +60,21 @@ async function start() {
           // 5. Run whisper transcription
           const segments = await transcribeAudio(wavPath, MODEL_PATH, outputBase);
           
-          // 6. Save segments and update status to TRANSCRIBED
+          // 6. Save segments
           await saveTranscriptSegments(mediaId, segments);
-          await updateMediaStatus(mediaId, 'TRANSCRIBED');
+          
+          // 7. Transition to SUMMARIZING and generate summary + chapters
+          console.log(`[Summarizing] Initiating AI summarization for media ID: ${mediaId}`);
+          await updateMediaStatus(mediaId, 'SUMMARIZING');
+          
+          const { summary, chapters } = await generateSummaryAndChapters(segments);
+          
+          // 8. Save summary and chapters, then set to COMPLETED
+          await saveSummaryAndChapters(mediaId, summary, chapters);
+          await updateMediaStatus(mediaId, 'COMPLETED');
           
           console.log(`[Job Success] Completed media ID: ${mediaId}`);
+
         } catch (err) {
           console.error(`[Job Failed] Error processing media ID ${mediaId}:`, err);
           // Set status to FAILED
