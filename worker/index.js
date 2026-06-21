@@ -3,6 +3,7 @@ const Redis = require('ioredis');
 const path = require('path');
 const fs = require('fs');
 const { extractAudio, transcribeAudio } = require('./transcribe');
+const { getMediaFile, updateMediaStatus, saveTranscriptSegments } = require('./db');
 
 // Load env vars
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -35,13 +36,43 @@ async function start() {
         const mediaId = parseInt(mediaIdStr, 10);
         console.log(`[Job Received] Processing media ID: ${mediaId}`);
         
-        // Placeholder for Plan 2 Database integration
-        // 1. Update media status to PROCESSING
-        // 2. Fetch media file path from DB
-        // 3. Run extractAudio & transcribeAudio
-        // 4. Save segments to DB and update media status to TRANSCRIBED
-        
-        console.log(`[Job Done] Finished processing media ID: ${mediaId}`);
+        try {
+          // 1. Fetch file details from database
+          const media = await getMediaFile(mediaId);
+          if (!media) {
+            console.error(`Media ID ${mediaId} not found in database. Skipping.`);
+            continue;
+          }
+          
+          console.log(`Media found: "${media.original_filename}" at path: ${media.file_path}`);
+          
+          // 2. Set status to PROCESSING
+          await updateMediaStatus(mediaId, 'PROCESSING');
+          
+          // 3. Define temp paths
+          const wavPath = path.join(__dirname, `temp_${mediaId}.wav`);
+          const outputBase = path.join(__dirname, `output_${mediaId}`);
+          
+          // 4. Extract audio (convert to 16kHz mono WAV)
+          await extractAudio(media.file_path, wavPath);
+          
+          // 5. Run whisper transcription
+          const segments = await transcribeAudio(wavPath, MODEL_PATH, outputBase);
+          
+          // 6. Save segments and update status to TRANSCRIBED
+          await saveTranscriptSegments(mediaId, segments);
+          await updateMediaStatus(mediaId, 'TRANSCRIBED');
+          
+          console.log(`[Job Success] Completed media ID: ${mediaId}`);
+        } catch (err) {
+          console.error(`[Job Failed] Error processing media ID ${mediaId}:`, err);
+          // Set status to FAILED
+          try {
+            await updateMediaStatus(mediaId, 'FAILED');
+          } catch (dbErr) {
+            console.error(`Failed to update media status to FAILED in db:`, dbErr);
+          }
+        }
       }
     } catch (err) {
       console.error('Error in worker polling loop:', err);
