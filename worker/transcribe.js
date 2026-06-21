@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
+const os = require('os');
 
 // Set ffmpeg path if it's installed via winget or custom location
 if (process.env.FFMPEG_PATH) {
@@ -63,9 +64,13 @@ function transcribeAudio(audioPath, modelPath, outputBase, onSpawn) {
     // -of: output file path (without extension)
     // -nt: no timestamps in stdout
     // -np: no prints of other info
+    // Determine CPU threads (leaving 1 thread free for system responsiveness)
+    const threads = Math.max(1, os.cpus().length - 1);
+
     const args = [
       '-m', modelPath,
       '-f', audioPath,
+      '-t', String(threads),
       '-oj',
       '-of', outputBase,
       '-nt',

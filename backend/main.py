@@ -256,7 +256,7 @@ async def ask_question_about_media(
                     "model": OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"num_ctx": 16384}
+                    "options": {"num_ctx": 4096}
                 },
                 timeout=60.0
             )

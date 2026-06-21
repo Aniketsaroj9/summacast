@@ -53,7 +53,7 @@ Summary:`;
         prompt: summaryPrompt,
         stream: false,
         options: {
-          num_ctx: 16384
+          num_ctx: 4096
         }
       })
     });
@@ -105,7 +105,7 @@ JSON response:`;
         format: 'json',
         stream: false,
         options: {
-          num_ctx: 16384
+          num_ctx: 4096
         }
       })
     });
