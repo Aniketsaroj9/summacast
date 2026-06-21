@@ -6,6 +6,47 @@ const { extractAudio, transcribeAudio } = require('./transcribe');
 const { getMediaFile, updateMediaStatus, saveTranscriptSegments, saveSummaryAndChapters } = require('./db');
 const { generateSummaryAndChapters } = require('./summarize');
 
+// Enforce a single running instance using a PID file lock
+const pidFile = path.join(__dirname, 'worker.pid');
+
+function checkSingleInstance() {
+  if (fs.existsSync(pidFile)) {
+    const existingPid = parseInt(fs.readFileSync(pidFile, 'utf8'), 10);
+    try {
+      // process.kill(pid, 0) checks if a process is alive
+      process.kill(existingPid, 0);
+      console.error(`\x1b[31m[Error] Another worker instance is already running with PID ${existingPid}.\x1b[0m`);
+      console.error(`\x1b[31mTo prevent task collisions, this instance will now exit.\x1b[0m`);
+      process.exit(1);
+    } catch (e) {
+      console.log(`[Worker] Reclaiming stale PID lock file left by PID ${existingPid}.`);
+    }
+  }
+
+  // Write current PID
+  fs.writeFileSync(pidFile, process.pid.toString(), 'utf8');
+
+  // Register cleanups
+  const cleanup = () => {
+    try {
+      if (fs.existsSync(pidFile)) {
+        fs.unlinkSync(pidFile);
+      }
+    } catch (e) {}
+  };
+
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => { cleanup(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+    cleanup();
+    process.exit(1);
+  });
+}
+
+checkSingleInstance();
+
 // Load env vars
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const MODEL_PATH = process.env.WHISPER_MODEL_PATH || path.join(__dirname, 'models', 'ggml-tiny.bin');
