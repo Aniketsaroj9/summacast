@@ -116,11 +116,38 @@ JSON response:`;
 
     const data = await response.json();
     const cleanResponse = data.response.trim();
+    console.log('[Ollama Chapters RAW response]:', cleanResponse);
     
-    // Parse the JSON array
-    chapters = JSON.parse(cleanResponse);
-    if (!Array.isArray(chapters)) {
-      throw new Error('Ollama chapters response is not an array.');
+    // Parse the JSON (could be a direct array or wrapped in an object like { chapters: [...] })
+    const parsed = JSON.parse(cleanResponse);
+    
+    // Recursive helper to find the first array in a JSON object structure
+    const findFirstArray = (val) => {
+      if (!val || typeof val !== 'object') return null;
+      if (Array.isArray(val)) return val;
+      for (const key of Object.keys(val)) {
+        const item = val[key];
+        if (Array.isArray(item)) return item;
+        if (item && typeof item === 'object') {
+          const found = findFirstArray(item);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const firstArray = findFirstArray(parsed);
+    if (firstArray) {
+      chapters = firstArray;
+    } else if (parsed && typeof parsed === 'object') {
+      // Check if it's a single chapter object directly
+      if (parsed.title || parsed.start_time !== undefined) {
+        chapters = [parsed];
+      } else {
+        throw new Error('Ollama chapters response is an object but contains no array property or chapter fields.');
+      }
+    } else {
+      throw new Error('Ollama chapters response is not an array or object.');
     }
     
     // Validate schema of each chapter object

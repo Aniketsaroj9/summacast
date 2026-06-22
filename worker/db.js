@@ -48,6 +48,9 @@ async function saveTranscriptSegments(mediaId, segments) {
   try {
     await client.query('BEGIN');
 
+    // Clear any existing segments first to avoid duplicates on retry
+    await client.query('DELETE FROM transcript_segments WHERE media_id = $1', [mediaId]);
+
     // Build batch insert query:
     // INSERT INTO transcript_segments (media_id, start_time, end_time, text) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)...
     const values = [];
@@ -85,6 +88,9 @@ async function saveSummaryAndChapters(mediaId, summary, chapters) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Clear any existing chapters first to avoid duplicates on retry
+    await client.query('DELETE FROM chapters WHERE media_id = $1', [mediaId]);
 
     // 1. Update Media summary field
     await client.query(
